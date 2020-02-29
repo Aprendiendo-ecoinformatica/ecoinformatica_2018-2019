@@ -1,0 +1,82 @@
+---
+title: "biodiversity_map_v1"
+author: "fjbonet"
+date: "2/1/2020"
+output: html_document
+chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/07_biodiversidad/material_profes/geoinfo/mapa_biodiv_REDIAM")
+
+library(rgdal)
+library(raster)
+
+```
+
+
+**Import ArcInfo GRID showing phytocenotic biodiversity**
+```{r}
+# 
+biomap<-raster("/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/07_biodiversidad/material_profes/geoinfo/mapa_biodiv_REDIAM/InfGeografica/InfRaster/GRID/div_fito22")
+
+# Check out that this layer has CRS EPSG23030
+proj4string(biomap)
+
+# plot the map
+plot(biomap)
+```
+
+**Crop biodiversity map with the limits of Sierra Nevada protected area
+```{r}
+
+# Import shapefile that will provide the extent
+
+snev<-readOGR(dsn="/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/04_densidad_pinares/material_profes/SINFONEVADA_original/temas", layer="pnatural", verbose = FALSE)
+
+# Spcecify CRS to snev
+EPSG23030 <- "+init=epsg:23030 +proj=utm +zone=30 +ellps=intl +units=m +no_defs"
+proj4string(snev)<-CRS(EPSG23030)
+
+#Create projected shapefile
+writeOGR(snev, dsn="/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/04_densidad_pinares/material_profes/SINFONEVADA_original/temas",layer="pnatural_23030", driver="ESRI Shapefile")
+
+# crop both rasters with the extent of the area
+biomap_area<-crop(biomap, snev)
+plot(biomap_area)
+
+```
+
+
+**Mask all areas out of pine plantations
+```{r}
+
+# Mask the pixels with no pines
+## Import tiff file showing distribution of pine plantations
+FTY_area<-raster("/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/04_densidad_pinares/material_profes/tree_cover_density_copernicus/TCD_FTY_E30N10/FTY_area.tif")
+
+plot(FTY_area)
+
+
+# Mask all vegetation out of Sierra Nevada
+biomap_snev<-mask(biomap_area, snev, crs=EPSG23030, overwrite=TRUE)
+
+plot(biomap_snev)
+
+# Align rasters
+biomap_snev_n<-projectRaster(biomap_snev, FTY_area)
+
+# Mask all vegetation but pine plantations
+biomap_snev_pines<-mask(biomap_snev_n, FTY_area,filename = "biomap_pines.tif", crs=EPSG23030, overwrite=TRUE)
+
+plot(biomap_snev_pines)
+
+
+
+```
+
+
+
+
