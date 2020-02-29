@@ -1,0 +1,128 @@
+---
+title: "biodiversity_map_GBIF"
+author: "fjbonet"
+date: "2/1/2020"
+output: html_document
+chunk_output_type: console
+---
+
+**This script computes the Shannon biodiversity index for Sierra Nevada using all the information existing in GBIF**
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/07_biodiversidad/material_profes/geoinfo/mapa_biodiv_GBIF")
+
+
+library(rgdal)
+library(raster)
+library(sp)
+library(sqldf)
+
+```
+
+
+**Import shapefile containing the species occurrences**
+```{r}
+# The original file is occurrence.txt (occurrence.zip).
+# This file was converted to a shapefile using QGIS:
+## Import the .txt file (don't drop empty fields)
+## separator = tab. Decimal is not comma.
+## Assign EPSG: 4326
+## Save as a shapefile
+## Reproject that shapefile to assign EPSG:23030
+
+occurrence<-readOGR(dsn=".", layer="occurrences_23030", verbose = FALSE)
+
+# Check out that this layer has CRS EPSG23030
+proj4string(occurrence)
+
+# plot the map
+plot(occurrence)
+```
+
+**Import shapefiles containing homogeneus grid**
+```{r}
+
+# Import grid size 100m
+grid100_snev<-readOGR(dsn=".", layer="grid_100_snev", verbose = FALSE)
+
+# Check out that this layer has CRS EPSG23030
+proj4string(grid100_snev)
+
+# Import grid size 500m
+grid500_snev<-readOGR(dsn=".", layer="grid_500_snev", verbose = FALSE)
+
+# Check out that this layer has CRS EPSG23030
+proj4string(grid500_snev)
+
+
+# Import grid size 1000m
+grid1000_snev<-readOGR(dsn=".", layer="grid_1000_snev", verbose = FALSE)
+
+# Check out that this layer has CRS EPSG23030
+proj4string(grid1000_snev)
+```
+
+
+
+**Conducting the spatial join. Assign the id of each grid to the occurrence point**
+```{r}
+
+# Spatial join with 100 m grid
+occurrence$id_100 <- over(occurrence, grid100_snev)$id
+occurrence$id_100<-as.numeric(occurrence$id_100)
+
+# Spatial join with 500 m grid
+occurrence$id_500 <- over(occurrence, grid500_snev)$id
+occurrence$id_500<-as.numeric(occurrence$id_500)
+
+# Spatial join with 1000 m grid
+occurrence$id_1000 <- over(occurrence, grid1000_snev)$id
+occurrence$id_1000<-as.numeric(occurrence$id_1000)
+
+```
+**Calculate Shannon index 1000m resolution**
+```{r}
+# Select the occurrences within our area of interest
+## Extract data (attribute table) from occurrence spatialdataframe
+bio<-occurrence@data
+
+## Subset the records (occurrences) within our area of interest
+bio_snev <- sqldf("SELECT * FROM bio WHERE id_1000 is not null AND id_500 is not null AND id_100 is not null")
+
+## Subset the records where species is not null
+bio_snev <- sqldf("SELECT * FROM bio_snev WHERE species is not null")
+
+# Compute the number of individual per species per square (num_ind_sp)
+Pi_1000<-sqldf("SELECT id_1000, species,  count(species) num_ind_sp  FROM bio_snev GROUP BY id_1000, species")
+
+
+# Calculate the total amount of individuals per square
+num_ind_tot<-sqldf("SELECT id_1000, sum(num_ind_sp) num_ind_tot FROM Pi_1000 GROUP BY id_1000")
+
+# Merge both tables to calculate Pi
+Pi_1000<-sqldf("SELECT id_1000, species, num_ind_sp, num_ind_tot FROM Pi_1000 LEFT JOIN num_ind_tot USING(id_1000)")
+
+Pi_1000$pi<-as.numeric(Pi_1000$pi)
+
+# Calculate pi per specie per square
+Pi_1000<-sqldf("SELECT id_1000, species, num_ind_sp, num_ind_tot, (num_ind_sp*1.0/num_ind_tot) pi FROM Pi_1000")
+
+# Calculate ln pi per species per square (log = ln)
+Pi_1000<-sqldf("SELECT id_1000, species, num_ind_sp, num_ind_tot, pi, log(pi)*pi lnpi_pi FROM Pi_1000")
+
+# Calculate H per square
+Pi_1000<-sqldf("SELECT id_1000, sum(lnpi_pi)*-1 H FROM Pi_1000 GROUP BY id_1000")
+
+# Export csv
+write.csv(Pi_1000, file="H_index_1000.csv")
+
+write.csv
+# Merge table H index with spatial dataframe
+grid1000_snev@data$H<-merge(x = grid1000_snev@data, y = Pi_1000, by.x = "id", by.y = "id_1000", all.x = TRUE)
+
+k<-merge(x = grid1000_snev@data, y = Pi_1000, by.x = "id", by.y = "id_1000", all.x = TRUE)
+
+# Write shapefile with H index per 1000m
+writeOGR(grid1000_snev, dsn=".", layer="H_index_1000", driver="ESRI Shapefile", overwrite=TRUE )
+```
+
