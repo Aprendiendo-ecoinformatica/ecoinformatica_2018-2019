@@ -1,0 +1,84 @@
+---
+title: "biodiversity_analysis"
+author: "fjbonet"
+date: "2/6/2020"
+output: html_document
+chunk_output_type: console
+---
+
+**This script creates a table that assign values of H diversity and tree densigy (in %. obtained from TCD copernicus) to al the sampling plots of Sinvonevada**
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/07_biodiversidad/material_profes/geoinfo/mapa_biodiv_sinfonevada")
+
+
+library(rgdal)
+library(raster)
+library(sp)
+library(sqldf)
+library(ggplot2)
+
+```
+
+
+**Import .txt file extrated from sinfonevada.mdb**
+```{r}
+# Import table containing H index per sampling plot (query: "shan_3_indice_final" )
+
+H<-read.csv("shan_3_indice_final.txt", header=TRUE, sep=";")
+
+# plot the map
+ggplot (H, aes(UTM_X_GPS,UTM_Y_GPS))+geom_point(aes(color=H), alpha=3/4)+ggtitle("H index")+coord_equal()+theme_bw()
+
+# Convert it into a spatial object
+coordinates(H)<-~ UTM_X_GPS + UTM_Y_GPS
+
+# Assign EPSG 23030
+EPSG23030 <- "+init=epsg:23030 +proj=utm +zone=30 +ellps=intl +units=m +no_defs"
+
+proj4string(H)<-CRS(EPSG23030)
+
+proj4string(H)
+```
+
+**Import tif file density map**
+```{r}
+
+# The map comes from "tree_cover_density_copernicus_v2.Rmd"
+TCD<-raster("/Users/fjbonet_trabajo/Google Drive/4_docencia/ugr/master_ugr_cons_bio/curso_2019_2020/ecoinf_2019_2020/material_2019_2020/04_densidad_pinares/material_profes/tree_cover_density_copernicus/TCD_FTY_E30N10/TCD_pines.tif")
+
+
+# Check out that this layer has CRS EPSG23030
+proj4string(TCD)
+
+```
+
+
+**Overlay sampling plots with TCD map**
+```{r}
+
+# Spatial join 
+H$TCD<-extract(TCD, H)
+
+# Create table to perform SQL
+H_TCD<-H@data
+
+# Subset sampling points out of pine plantations
+H_TCD_pines <- sqldf("SELECT * FROM H_TCD WHERE TCD is not null")
+
+# Export the obtained table to .csv file
+write.csv(H_TCD_pines, file="H_TCD_pines.csv")
+
+# Export shapefile
+writeOGR(H, dsn=".", layer="H_TCD", driver="ESRI Shapefile", overwrite=TRUE )
+
+
+```
+
+**Create simple scatterplot TCD vs H**
+```{r}
+ggplot(H_TCD_pines, aes(x=TCD, y=H))+
+  geom_point(shape=1)+
+  geom_smooth(method=lm)
+```
+
